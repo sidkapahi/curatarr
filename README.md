@@ -112,6 +112,3 @@ All actions are logged to `/config/librarian.log` in JSON format:
 {"timestamp":"2026-04-07T19:00:00.000Z","level":"INFO","message":"Request command","data":{"user":"Sid#1234","query":"The Martian"}}
 {"timestamp":"2026-04-07T19:00:01.000Z","level":"INFO","message":"Book added successfully","data":{"title":"The Martian","id":42}}
 ```
-
----
-
