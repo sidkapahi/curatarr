@@ -7,6 +7,7 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
+  <Beta>true</Beta>
   <Support>https://github.com/sidkapahi/curatarr</Support>
   <Project>https://github.com/sidkapahi/curatarr</Project>
   <Overview>⚠️ REQUIRES: Bookshelf (Readarr fork), Prowlarr with audiobook indexers, and a Discord bot token before this will work.
