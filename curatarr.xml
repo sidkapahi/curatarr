@@ -2,7 +2,7 @@
 <Container version="2">
   <n>curatarr</n>
   <Repository>fallsoldier/curatarr:latest</Repository>
-  <Registry>https://hub.docker.com/r/fallsoldier/curatarr</Registry>
+  <Registry>https://hub.docker.com/r/sidkapahiii/curatarr</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
