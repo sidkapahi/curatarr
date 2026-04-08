@@ -1,0 +1,148 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>librarian</Name>
+  <Repository>yourusername/librarian:latest</Repository>
+  <Registry>https://hub.docker.com/r/yourusername/librarian</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/yourusername/librarian</Support>
+  <Project>https://github.com/yourusername/librarian</Project>
+  <Overview>Discord bot for requesting audiobooks via Bookshelf (Readarr fork). Works like Requestrr but for audiobooks. Supports slash commands, approval queues, DM notifications, and full JSON logging.</Overview>
+  <Category>Tools:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/yourusername/librarian/main/librarian.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/yourusername/librarian/main/icon.png</Icon>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Bookshelf (Readarr fork) must be installed and running. A Discord bot token is required from https://discord.com/developers/applications</Requires>
+
+  <!-- ── Volumes ─────────────────────────────────────────────────────── -->
+  <Config
+    Name="Config"
+    Target="/config"
+    Default="/mnt/user/appdata/librarian"
+    Mode="rw"
+    Description="Stores bot config, logs, and pending requests."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false"
+  >/mnt/user/appdata/librarian</Config>
+
+  <!-- ── Required Variables ─────────────────────────────────────────── -->
+  <Config
+    Name="Discord Bot Token"
+    Target="DISCORD_TOKEN"
+    Default=""
+    Mode=""
+    Description="Your Discord bot token from https://discord.com/developers/applications → Bot → Token"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"
+  />
+
+  <Config
+    Name="Discord Client ID"
+    Target="DISCORD_CLIENT_ID"
+    Default=""
+    Mode=""
+    Description="Your Discord application Client ID from https://discord.com/developers/applications → OAuth2"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  />
+
+  <Config
+    Name="Bookshelf URL"
+    Target="BOOKSHELF_URL"
+    Default="http://bookshelf:8787"
+    Mode=""
+    Description="URL to your Bookshelf instance. If on the same Docker network use the container name e.g. http://bookshelf:8787. Otherwise use your Unraid IP e.g. http://192.168.1.x:8787"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  />
+
+  <Config
+    Name="Bookshelf API Key"
+    Target="BOOKSHELF_API_KEY"
+    Default=""
+    Mode=""
+    Description="Your Bookshelf API key. Found in Bookshelf → Settings → General → API Key"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"
+  />
+
+  <!-- ── Optional Variables ─────────────────────────────────────────── -->
+  <Config
+    Name="Discord Server ID"
+    Target="DISCORD_GUILD_ID"
+    Default=""
+    Mode=""
+    Description="Your Discord server ID. Recommended — makes slash command registration instant instead of taking up to an hour. Enable Developer Mode in Discord settings, then right-click your server → Copy Server ID"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+  <Config
+    Name="Request Channel ID"
+    Target="REQUEST_CHANNEL_ID"
+    Default=""
+    Mode=""
+    Description="Optional. Restrict the bot to a specific channel. Right-click the channel in Discord → Copy Channel ID. Leave blank to allow commands in all channels."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+  <Config
+    Name="Admin Role ID"
+    Target="ADMIN_ROLE_ID"
+    Default=""
+    Mode=""
+    Description="Optional. Discord Role ID that counts as admin for approvals and admin commands. Leave blank to use the server Administrator permission instead."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+  <Config
+    Name="Require Approval"
+    Target="REQUIRE_APPROVAL"
+    Default="false"
+    Mode=""
+    Description="If set to true, all book requests will be sent to an admin approval queue before downloading. Admins approve or deny via Discord buttons. Set to false for instant downloads."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+  <Config
+    Name="Log File Path"
+    Target="LOG_FILE"
+    Default="/config/librarian.log"
+    Mode=""
+    Description="Path inside the container where logs are written. Default is /config/librarian.log which maps to your appdata folder."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  />
+
+</Container>
