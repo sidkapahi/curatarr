@@ -1,106 +1,210 @@
 # Librarian
 
-A Discord bot for requesting audiobooks via Bookshelf (Readarr fork). Works like Requestrr but for audiobooks.
+A Discord bot for requesting audiobooks via [Bookshelf](https://github.com/pennydreadful/bookshelf) (the Readarr fork). Think of it as Requestrr, but for audiobooks.
 
-## Features
-
-- `/request <title>` — Search and request an audiobook. Shows a dropdown of results with cover art, author, year and rating. Checks your library first so you don't request duplicates.
-- `/library <query>` — Search your existing Bookshelf library
-- `/status` — View the current download queue
-- `/pending` — Admin only: view and approve/deny pending requests
-- `/logs` — Admin only: view recent bot logs
-- Approval mode — optionally require admin approval before downloads trigger
-- DMs requester when their request is approved or denied
-- Full JSON logging of every action to `/config/librarian.log`
+![Version](https://img.shields.io/badge/version-v1.0.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-## Setup
+## Features
+
+- `/request` — Search and request audiobooks with a clean two-step UI (dropdown → embed → Request button)
+- `/library` — Search your existing Bookshelf library
+- `/status` — View the current download queue
+- `/pending` — Admin only: view and approve/deny pending requests via DM
+- `/logs` — Admin only: view recent bot activity
+- **Ephemeral responses** — only the person who typed sees the bot's reply, no channel clutter
+- **Approval mode** — optionally require admin approval before downloads trigger
+- **Admin DMs** — requests ping you directly via Discord DM with Approve/Deny buttons
+- **Requester notifications** — users get a DM when their request is approved or denied
+- **Duplicate detection** — checks your library before showing results
+- **Full JSON logging** — every action logged to disk
+
+---
+
+## Requirements
+
+- [Bookshelf](https://github.com/pennydreadful/bookshelf) (Readarr fork) running and accessible
+- [Prowlarr](https://github.com/Prowlarr/Prowlarr) with audiobook indexers configured and synced to Bookshelf
+- A Discord bot token ([Discord Developer Portal](https://discord.com/developers/applications))
+- Docker
+
+---
+
+## Quick Start
 
 ### 1. Create a Discord Application
 
-1. Go to https://discord.com/developers/applications
-2. Click **New Application** → name it `Librarian`
-3. Go to **Bot** tab → click **Add Bot**
-4. Under **Token** click **Reset Token** and copy it → this is your `DISCORD_TOKEN`
-5. Enable these **Privileged Gateway Intents**:
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
+2. Click **New Application** and name it `Librarian`
+3. Go to **Bot** → click **Add Bot**
+4. Under **Token** click **Reset Token** and copy it — this is your `DISCORD_TOKEN`
+5. Scroll down and enable these **Privileged Gateway Intents**:
    - Server Members Intent
    - Message Content Intent
-6. Go to **OAuth2 → General** and copy the **Client ID** → this is your `DISCORD_CLIENT_ID`
+6. Go to **OAuth2** → copy the **Client ID** — this is your `DISCORD_CLIENT_ID`
 
-### 2. Invite the bot to your server
+### 2. Invite the Bot to Your Server
 
-Go to **OAuth2 → URL Generator**:
-- Scopes: `bot`, `applications.commands`
-- Bot Permissions: `Send Messages`, `Embed Links`, `Use Slash Commands`, `Read Message History`
+Go to **OAuth2 → URL Generator** and set:
+- **Scopes:** `bot`, `applications.commands`
+- **Bot Permissions:** `Send Messages`, `Embed Links`, `Use Slash Commands`, `Read Message History`
 
 Copy the generated URL and open it in your browser to add the bot to your server.
 
-### 3. Get your Bookshelf API key
+### 3. Get Your IDs
 
-In Bookshelf web UI: **Settings → General → API Key** — copy it.
+**Discord Server ID:**
+- In Discord: **Settings → Advanced → Enable Developer Mode**
+- Right-click your server name → **Copy Server ID**
 
-### 4. Get your Discord Server ID
+**Your Discord User ID (for approval DMs):**
+- Right-click your name in Discord → **Copy User ID**
 
-In Discord: **Settings → Advanced → Enable Developer Mode**
-Then right-click your server name → **Copy Server ID**
+**Bookshelf API Key:**
+- In Bookshelf: **Settings → General → API Key**
 
-### 5. Install on Unraid
+### 4. Deploy with Docker
 
-#### Option A — Community Apps (recommended)
-Search for **Librarian** in the Unraid Community Apps store and install directly.
+#### Option A — Docker Compose (recommended)
 
-#### Option B — Docker Compose
+```yaml
+version: "3.8"
+
+services:
+  librarian:
+    image: yourusername/librarian:latest
+    container_name: librarian
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=your_discord_bot_token
+      - DISCORD_CLIENT_ID=your_client_id
+      - DISCORD_GUILD_ID=your_server_id
+      - BOOKSHELF_URL=http://bookshelf:8787
+      - BOOKSHELF_API_KEY=your_bookshelf_api_key
+      - ADMIN_USER_ID=your_discord_user_id
+      - QUALITY_PROFILE_NAME=Spoken
+      - METADATA_PROFILE_NAME=None
+      - REQUIRE_APPROVAL=false
+      - LOG_FILE=/config/librarian.log
+      - TZ=America/Toronto
+    volumes:
+      - /mnt/user/appdata/librarian:/config
+    networks:
+      - your_docker_network
+
+networks:
+  your_docker_network:
+    external: true
+```
+
 ```bash
-# Copy files to your server
-mkdir -p /mnt/user/appdata/librarian-src
-# Upload bot.js, package.json, Dockerfile, docker-compose.yml
-
-# Build the image
-cd /mnt/user/appdata/librarian-src
-docker build -t librarian:latest .
-
-# Edit docker-compose.yml with your values then run
 docker compose up -d
 ```
 
-#### Option C — Unraid Docker UI (after building image)
-- **Repository:** `librarian:latest`
-- **Network:** your Docker network
-- **Volume:** `/mnt/user/appdata/librarian` → `/config`
-- Add all environment variables listed below
+#### Option B — Docker Run
+
+```bash
+docker run -d \
+  --name librarian \
+  --restart unless-stopped \
+  --network your_docker_network \
+  -e DISCORD_TOKEN=your_discord_bot_token \
+  -e DISCORD_CLIENT_ID=your_client_id \
+  -e DISCORD_GUILD_ID=your_server_id \
+  -e BOOKSHELF_URL=http://bookshelf:8787 \
+  -e BOOKSHELF_API_KEY=your_bookshelf_api_key \
+  -e ADMIN_USER_ID=your_discord_user_id \
+  -e QUALITY_PROFILE_NAME=Spoken \
+  -e METADATA_PROFILE_NAME=None \
+  -e REQUIRE_APPROVAL=false \
+  -e LOG_FILE=/config/librarian.log \
+  -e TZ=America/Toronto \
+  -v /mnt/user/appdata/librarian:/config \
+  yourusername/librarian:latest
+```
+
+#### Option C — Unraid Community Apps
+
+Search for **Librarian** in the Community Apps store and install directly. All fields are pre-populated — just fill in your values.
 
 ---
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `DISCORD_TOKEN` | ✅ | Your bot token from Discord Developer Portal |
-| `DISCORD_CLIENT_ID` | ✅ | Your application's client ID |
-| `BOOKSHELF_URL` | ✅ | URL to your Bookshelf instance e.g. `http://bookshelf:8787` |
-| `BOOKSHELF_API_KEY` | ✅ | Bookshelf API key from Settings → General |
-| `DISCORD_GUILD_ID` | Recommended | Your Discord server ID — makes command registration instant |
-| `REQUEST_CHANNEL_ID` | Optional | Restrict bot to one channel |
-| `ADMIN_ROLE_ID` | Optional | Role ID for admins (defaults to server Administrator permission) |
-| `REQUIRE_APPROVAL` | Optional | Set to `true` to require admin approval before downloads |
-| `LOG_FILE` | Optional | Log file path, defaults to `/config/librarian.log` |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DISCORD_TOKEN` | ✅ | — | Bot token from Discord Developer Portal |
+| `DISCORD_CLIENT_ID` | ✅ | — | Application Client ID from Discord Developer Portal |
+| `BOOKSHELF_URL` | ✅ | — | URL to your Bookshelf instance e.g. `http://bookshelf:8787` |
+| `BOOKSHELF_API_KEY` | ✅ | — | Bookshelf API key from Settings → General |
+| `DISCORD_GUILD_ID` | Recommended | — | Your Discord server ID. Makes slash command registration instant |
+| `ADMIN_USER_ID` | Recommended | — | Your Discord user ID. Receives approval request DMs |
+| `QUALITY_PROFILE_NAME` | — | `Spoken` | Name of the quality profile in Bookshelf to use for audiobooks |
+| `METADATA_PROFILE_NAME` | — | `None` | Name of the metadata profile in Bookshelf to use |
+| `REQUIRE_APPROVAL` | — | `false` | Set to `true` to require admin approval before downloads trigger |
+| `REQUEST_CHANNEL_ID` | — | — | Restrict bot to a specific channel. Leave blank for all channels |
+| `ADMIN_ROLE_ID` | — | — | Role ID for admin commands. Leave blank to use server Administrator permission |
+| `LOG_FILE` | — | `/config/librarian.log` | Path inside container where logs are written |
+| `TZ` | — | `UTC` | Timezone for log timestamps e.g. `America/Toronto` |
 
 ---
 
-## How it works
+## How It Works
 
-### For users
-1. Type `/request The Martian` in Discord
-2. Bot searches Bookshelf and shows a dropdown of results with cover art
-3. Select your book
-4. If approval is off: book is immediately added and download triggered
-5. If approval is on: request goes to admin queue, you get a DM when approved/denied
+### For Users
 
-### For admins
-- `/pending` shows all requests waiting for approval with Approve/Deny buttons
-- `/logs` shows the last 20 log entries
-- `/status` shows the current download queue
+1. Type `/request` and enter a book title or author name
+2. A dropdown appears — select the book you want
+3. The book embed appears with a **Request** button
+4. Click **Request**
+5. If approval is off: book is added to Bookshelf and download starts immediately
+6. If approval is on: you get a confirmation and will receive a DM when approved or denied
+
+### For Admins
+
+- When a request comes in (approval mode), you receive a DM with **Approve** and **Deny** buttons
+- `/pending` — sends all pending requests to your DMs
+- `/logs` — shows the last 20 log entries
+- `/status` — shows the current Bookshelf download queue
+- Admins bypass the approval queue and can request directly
+
+---
+
+## Building from Source
+
+```bash
+git clone https://github.com/yourusername/librarian.git
+cd librarian
+npm install
+docker build -t librarian:latest .
+```
+
+To push to Docker Hub:
+
+```bash
+docker tag librarian:latest yourusername/librarian:latest
+docker push yourusername/librarian:latest
+```
+
+---
+
+## Updating
+
+If you have `bot.js` mounted as a volume (recommended for development):
+
+```bash
+# Replace bot.js with the new version, then:
+docker restart librarian
+```
+
+If running from the Docker image:
+
+```bash
+docker pull yourusername/librarian:latest
+docker restart librarian
+```
 
 ---
 
@@ -109,6 +213,35 @@ docker compose up -d
 All actions are logged to `/config/librarian.log` in JSON format:
 
 ```json
-{"timestamp":"2026-04-07T19:00:00.000Z","level":"INFO","message":"Request command","data":{"user":"Sid#1234","query":"The Martian"}}
-{"timestamp":"2026-04-07T19:00:01.000Z","level":"INFO","message":"Book added successfully","data":{"title":"The Martian","id":42}}
+{"timestamp":"2026-04-08, 12:00:00","level":"INFO","message":"Request command","data":{"user":"Sid#1234","query":"Dune"}}
+{"timestamp":"2026-04-08, 12:00:05","level":"INFO","message":"Book added successfully","data":{"title":"Dune Messiah","id":3}}
+{"timestamp":"2026-04-08, 12:00:05","level":"INFO","message":"Search triggered","data":{"bookId":3}}
 ```
+
+---
+
+## Troubleshooting
+
+**Bot not responding to slash commands**
+- Make sure `DISCORD_GUILD_ID` is set — global command registration can take up to an hour
+- Check the bot has `Use Slash Commands` permission in your server
+
+**"Failed to add book" error**
+- Verify your `BOOKSHELF_URL` is reachable from the container
+- Check `QUALITY_PROFILE_NAME` and `METADATA_PROFILE_NAME` match exactly what's in Bookshelf Settings → Profiles
+- Check `/logs` for the detailed error message
+
+**Book added but not downloading**
+- Make sure Prowlarr indexers are synced to Bookshelf (Settings → Indexers in Bookshelf)
+- For audiobooks, AudioBookBay and MyAnonamouse (MAM) are the best indexers
+- Check Bookshelf → Activity → Queue after a request
+
+**Approval DMs not arriving**
+- Set `ADMIN_USER_ID` to your Discord user ID (right-click your name → Copy User ID)
+- Make sure you haven't blocked DMs from server members
+
+---
+
+## License
+
+MIT — do whatever you want with it.

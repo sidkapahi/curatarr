@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   librarian:
-    image: librarian:latest
+    image: yourusername/librarian:latest
     container_name: librarian
     restart: unless-stopped
     environment:

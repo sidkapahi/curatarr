@@ -18,110 +18,41 @@ const config = {
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
   DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
   DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID || null,
-  BOOKSHELF_URL: process.env.BOOKSHELF_URL, // e.g. http://bookshelf:8787
+  BOOKSHELF_URL: process.env.BOOKSHELF_URL,
   BOOKSHELF_API_KEY: process.env.BOOKSHELF_API_KEY,
-  REQUEST_CHANNEL_ID: process.env.REQUEST_CHANNEL_ID || null, // optional: restrict to one channel
-  ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID || null, // optional: role that can approve/deny
+  REQUEST_CHANNEL_ID: process.env.REQUEST_CHANNEL_ID || null,
+  ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID || null,
+  ADMIN_USER_ID: process.env.ADMIN_USER_ID || null,
   LOG_FILE: process.env.LOG_FILE || "/config/librarian.log",
-  REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL === "true", // if true, admin must approve requests
+  REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL === "true",
+  QUALITY_PROFILE_NAME: process.env.QUALITY_PROFILE_NAME || "Spoken",
+  METADATA_PROFILE_NAME: process.env.METADATA_PROFILE_NAME || "None",
+  TZ: process.env.TZ || "UTC",
 };
 
 // ─── Logger ────────────────────────────────────────────────────────────────
 const logDir = path.dirname(config.LOG_FILE);
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
-function log(level, message, data = null) {
-  const timestamp = new Date().toISOString();
-  const entry = { timestamp, level, message, ...(data && { data }) };
-  const line = JSON.stringify(entry);
-  fs.appendFileSync(config.LOG_FILE, line + "\n");
-  console.log(`[${timestamp}] [${level}] ${message}`, data || "");
+function log(level, message, data) {
+  const timestamp = new Date().toLocaleString("en-CA", { timeZone: config.TZ, hour12: false });
+  const entry = { timestamp, level, message };
+  if (data) entry.data = data;
+  fs.appendFileSync(config.LOG_FILE, JSON.stringify(entry) + "\n");
+  console.log("[" + timestamp + "] [" + level + "] " + message, data || "");
 }
 
 // ─── Bookshelf API ─────────────────────────────────────────────────────────
 const bsApi = axios.create({
-  baseURL: `${config.BOOKSHELF_URL}/api/v1`,
+  baseURL: config.BOOKSHELF_URL + "/api/v1",
   headers: { "X-Api-Key": config.BOOKSHELF_API_KEY },
-  timeout: 10000,
+  timeout: 15000,
 });
 
 async function searchBooks(term) {
   log("INFO", "Searching Bookshelf", { term });
   const res = await bsApi.get("/book/lookup", { params: { term } });
-  return res.data.slice(0, 10); // max 10 results
-}
-
-async function getAuthor(foreignAuthorId) {
-  const res = await bsApi.get("/author/lookup", {
-    params: { term: foreignAuthorId },
-  });
-  return res.data[0] || null;
-}
-
-async function addBook(book) {
-  log("INFO", "Adding book to Bookshelf", {
-    title: book.title,
-    author: book.author?.authorName,
-  });
-
-  // First ensure author exists
-  let authorRes;
-  try {
-    const authorSearch = await bsApi.get("/author/lookup", {
-      params: { term: book.author?.authorName || "" },
-    });
-    const matchedAuthor = authorSearch.data.find(
-      (a) => a.foreignAuthorId === book.author?.foreignAuthorId
-    );
-
-    if (matchedAuthor) {
-      try {
-        authorRes = await bsApi.post("/author", {
-          foreignAuthorId: matchedAuthor.foreignAuthorId,
-          qualityProfileId: 1,
-          metadataProfileId: 1,
-          rootFolderPath: await getRootFolder(),
-          monitored: true,
-          monitorNewItems: "none",
-          addOptions: { monitor: "none" },
-        });
-      } catch (e) {
-        // Author may already exist
-        const existing = await bsApi.get("/author");
-        authorRes = existing.data.find(
-          (a) => a.foreignAuthorId === matchedAuthor.foreignAuthorId
-        );
-      }
-    }
-  } catch (e) {
-    log("WARN", "Author lookup failed, proceeding", { error: e.message });
-  }
-
-  // Add the book
-  const rootFolder = await getRootFolder();
-  const payload = {
-    title: book.title,
-    foreignBookId: book.foreignBookId,
-    monitored: true,
-    anyEditionOk: true,
-    author: {
-      foreignAuthorId: book.author?.foreignAuthorId,
-      qualityProfileId: 1,
-      metadataProfileId: 1,
-      rootFolderPath: rootFolder,
-      monitored: true,
-      monitorNewItems: "none",
-      addOptions: { monitor: "none" },
-    },
-    editions: book.editions,
-    addOptions: {
-      searchForNewBook: true,
-    },
-  };
-
-  const res = await bsApi.post("/book", payload);
-  log("INFO", "Book added successfully", { title: book.title, id: res.data.id });
-  return res.data;
+  return res.data.slice(0, 10);
 }
 
 async function getRootFolder() {
@@ -130,483 +61,604 @@ async function getRootFolder() {
   return res.data[0].path;
 }
 
-async function triggerSearch(bookId) {
-  log("INFO", "Triggering search", { bookId });
-  await bsApi.post("/command", { name: "BookSearch", bookIds: [bookId] });
+async function getQualityProfileId() {
+  const res = await bsApi.get("/qualityprofile");
+  if (!res.data || res.data.length === 0) throw new Error("No quality profiles found");
+  const match = res.data.find(function(p) { return p.name.toLowerCase() === config.QUALITY_PROFILE_NAME.toLowerCase(); });
+  if (match) return match.id;
+  log("WARN", "Quality profile not found by name, using first", { wanted: config.QUALITY_PROFILE_NAME });
+  return res.data[0].id;
 }
 
-async function getQueue() {
-  const res = await bsApi.get("/queue");
+async function getMetadataProfileId() {
+  const res = await bsApi.get("/metadataprofile");
+  if (!res.data || res.data.length === 0) throw new Error("No metadata profiles found");
+  const match = res.data.find(function(p) { return p.name.toLowerCase() === config.METADATA_PROFILE_NAME.toLowerCase(); });
+  if (match) return match.id;
+  log("WARN", "Metadata profile not found by name, using first", { wanted: config.METADATA_PROFILE_NAME });
+  return res.data[0].id;
+}
+
+// ─── Author name parsing ───────────────────────────────────────────────────
+// authorTitle format from Bookshelf: "lastname, firstname Book Title"
+// Handles: "herbert, frank", "rowling, j.k.", "le guin, ursula k.",
+//          "tolkien, j.r.r.", "garcia marquez, gabriel", "o'brien, tim"
+var AUTHOR_REGEX = /^([a-z\-'\.]+(?:\s[a-z\-'\.]+)?,\s[a-z\-'\.\s]+?)\s+/i;
+
+function formatName(n) {
+  return n.trim().replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
+function extractAuthorFromAuthorTitle(authorTitle) {
+  if (!authorTitle) return null;
+  var match = authorTitle.match(AUTHOR_REGEX);
+  if (!match) return null;
+  var parts = match[1].split(",").map(function(p) { return p.trim(); });
+  var lastName = formatName(parts[0]);
+  var firstName = parts[1] ? formatName(parts[1]) : "";
+  return firstName ? firstName + " " + lastName : lastName;
+}
+
+function parseBookTitle(book) {
+  var title = book.title || "";
+  var author = extractAuthorFromAuthorTitle(book.authorTitle);
+
+  // Fallback to structured author field
+  if (!author && book.author && book.author.authorName) {
+    var raw = book.author.authorName;
+    // Handle "Last, First" format
+    if (/^[^,]+,\s[^,]+$/.test(raw)) {
+      var ap = raw.split(",").map(function(p) { return p.trim(); });
+      author = formatName(ap[1]) + " " + formatName(ap[0]);
+    } else {
+      author = raw;
+    }
+  }
+
+  return { title: title, author: author || "Unknown Author" };
+}
+
+// ─── Edition construction ──────────────────────────────────────────────────
+// Bookshelf's /book/lookup never returns editions, but the POST /book endpoint
+// requires them. We construct a minimal valid edition from the lookup data.
+function buildEditionFromBook(book) {
+  return {
+    bookId: 0,
+    foreignEditionId: book.foreignEditionId || book.titleSlug || "",
+    titleSlug: book.foreignEditionId || book.titleSlug || "",
+    isbn13: "",
+    asin: "",
+    title: book.title || "",
+    overview: book.overview || "",
+    format: "",
+    pageCount: book.pageCount || 0,
+    releaseDate: book.releaseDate || null,
+    publisher: "",
+    language: "eng",
+    isEbook: false,
+    monitored: true,
+    manualAdd: false,
+    grabbed: false,
+    ratings: book.ratings || { votes: 0, value: 0, popularity: 0 },
+    images: book.images || [],
+    links: book.links || [],
+  };
+}
+
+// ─── Add book to Bookshelf ─────────────────────────────────────────────────
+async function addBook(book) {
+  var parsed = parseBookTitle(book);
+  log("INFO", "Adding book", { title: parsed.title, author: parsed.author });
+
+  var rootFolder = await getRootFolder();
+  var qualityProfileId = await getQualityProfileId();
+  var metadataProfileId = await getMetadataProfileId();
+
+  log("INFO", "Profiles resolved", { qualityProfileId, metadataProfileId, rootFolder });
+
+  // ── Step 1: Find the author foreignAuthorId via lookup ──
+  var authorForeignId = null;
+  var authorName = extractAuthorFromAuthorTitle(book.authorTitle) ||
+    (book.author && book.author.authorName) || null;
+
+  if (authorName) {
+    try {
+      var authorSearch = await bsApi.get("/author/lookup", { params: { term: authorName } });
+      if (authorSearch.data && authorSearch.data.length > 0) {
+        // Try to find best match by last name
+        var lastName = book.authorTitle ? book.authorTitle.split(",")[0].trim().toLowerCase() : "";
+        var bestMatch = authorSearch.data.find(function(a) {
+          return a.authorNameLastFirst && a.authorNameLastFirst.toLowerCase().startsWith(lastName);
+        }) || authorSearch.data[0];
+        authorForeignId = bestMatch.foreignAuthorId;
+        log("INFO", "Author found", { name: authorName, foreignAuthorId: authorForeignId });
+      }
+    } catch (e) {
+      log("WARN", "Author lookup failed", { error: e.message });
+    }
+  }
+
+  // ── Step 2: Ensure author exists in Bookshelf ──
+  if (authorForeignId) {
+    try {
+      await bsApi.post("/author", {
+        foreignAuthorId: authorForeignId,
+        qualityProfileId: qualityProfileId,
+        metadataProfileId: metadataProfileId,
+        rootFolderPath: rootFolder,
+        monitored: true,
+        monitorNewItems: "none",
+        addOptions: { monitor: "none", booksToMonitor: [], searchForMissingBooks: false },
+      });
+      log("INFO", "Author added to Bookshelf");
+    } catch (e) {
+      // 409/500 usually means already exists — that's fine
+      log("INFO", "Author already in Bookshelf (or add skipped)", { status: e.response && e.response.status });
+    }
+  }
+
+  // ── Step 3: Build the book payload with constructed edition ──
+  var edition = buildEditionFromBook(book);
+
+  var payload = {
+    title: book.title,
+    foreignBookId: book.foreignBookId,
+    titleSlug: book.titleSlug || book.foreignBookId,
+    monitored: true,
+    anyEditionOk: true,
+    editions: [edition],
+    addOptions: { searchForNewBook: true },
+    ratings: book.ratings || { votes: 0, value: 0, popularity: 0 },
+    releaseDate: book.releaseDate || null,
+    genres: book.genres || [],
+    images: book.images || [],
+    links: book.links || [],
+    overview: book.overview || "",
+    seriesTitle: book.seriesTitle || "",
+    disambiguation: book.disambiguation || "",
+    pageCount: book.pageCount || 0,
+    remoteCover: book.remoteCover || "",
+    added: "0001-01-01T00:00:00Z",
+    grabbed: false,
+    authorId: 0,
+    authorTitle: book.authorTitle || "",
+  };
+
+  if (authorForeignId) {
+    payload.author = {
+      foreignAuthorId: authorForeignId,
+      qualityProfileId: qualityProfileId,
+      metadataProfileId: metadataProfileId,
+      rootFolderPath: rootFolder,
+      monitored: true,
+      monitorNewItems: "none",
+      addOptions: {
+        monitor: "none",
+        booksToMonitor: [book.foreignBookId],
+        searchForMissingBooks: false,
+      },
+    };
+  }
+
+  log("INFO", "Sending payload", {
+    foreignBookId: book.foreignBookId,
+    foreignEditionId: edition.foreignEditionId,
+    hasAuthor: !!payload.author,
+    authorForeignId,
+  });
+
+  var res = await bsApi.post("/book", payload).catch(function(e) {
+    log("ERROR", "Book add failed", {
+      status: e.response && e.response.status,
+      message: e.response && e.response.data && e.response.data.message,
+    });
+    throw e;
+  });
+
+  log("INFO", "Book added successfully", { title: book.title, id: res.data.id });
+
+  // ── Step 4: Explicitly trigger search ──
+  try {
+    await bsApi.post("/command", { name: "BookSearch", bookIds: [res.data.id] });
+    log("INFO", "Search triggered", { bookId: res.data.id });
+  } catch (e) {
+    log("WARN", "Search trigger failed", { error: e.message });
+  }
+
   return res.data;
 }
 
-async function getLibrary() {
-  const res = await bsApi.get("/book");
-  return res.data;
-}
+async function getQueue() { var res = await bsApi.get("/queue"); return res.data; }
+async function getLibrary() { var res = await bsApi.get("/book"); return res.data; }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-function bookEmbed(book, status = null, requester = null) {
-  const cover = book.remoteCover || book.editions?.[0]?.remoteCover || null;
-  const author = book.author?.authorName || book.authorTitle || "Unknown Author";
-  const rating = book.ratings?.value ? `⭐ ${book.ratings.value.toFixed(1)}/5` : "";
-  const pages = book.editions?.[0]?.pageCount ? `📄 ${book.editions[0].pageCount} pages` : "";
-  const year = book.releaseDate ? new Date(book.releaseDate).getFullYear() : "";
+// ─── Embeds ────────────────────────────────────────────────────────────────
+function bookEmbedUser(book, status) {
+  var cover = book.remoteCover || (book.images && book.images[0] && book.images[0].remoteUrl) || null;
+  var parsed = parseBookTitle(book);
+  var rating = book.ratings && book.ratings.value ? "⭐ " + book.ratings.value.toFixed(1) + "/5" : "";
+  var pages = book.pageCount ? "📄 " + book.pageCount + " pages" : "";
+  var year = book.releaseDate ? new Date(book.releaseDate).getFullYear() : "";
+  var overview = book.overview || null;
+  var color = status === "approved" ? 0x00ff00 : status === "denied" ? 0xff0000 : status === "pending" ? 0xffa500 : 0x5865f2;
 
-  const embed = new EmbedBuilder()
-    .setTitle(book.title)
-    .setAuthor({ name: author })
-    .setColor(status === "approved" ? 0x00ff00 : status === "denied" ? 0xff0000 : status === "pending" ? 0xffa500 : 0x5865f2)
+  var embed = new EmbedBuilder()
+    .setTitle(parsed.title)
+    .setAuthor({ name: parsed.author })
+    .setColor(color)
     .setFooter({ text: "Librarian" })
     .setTimestamp();
 
-  if (cover) embed.setThumbnail(cover);
-  if (book.overview) embed.setDescription(book.overview.slice(0, 300) + (book.overview.length > 300 ? "..." : ""));
+  if (cover) embed.setImage(cover);
+  if (overview) embed.setDescription(overview.slice(0, 350) + (overview.length > 350 ? "..." : ""));
 
-  const fields = [];
+  var fields = [];
   if (year) fields.push({ name: "Year", value: String(year), inline: true });
   if (rating) fields.push({ name: "Rating", value: rating, inline: true });
   if (pages) fields.push({ name: "Length", value: pages, inline: true });
   if (status) fields.push({ name: "Status", value: status.charAt(0).toUpperCase() + status.slice(1), inline: true });
-  if (requester) fields.push({ name: "Requested by", value: requester, inline: true });
   if (fields.length) embed.addFields(fields);
 
   return embed;
 }
 
-function isAdmin(member) {
-  if (!config.ADMIN_ROLE_ID) return member.permissions.has(PermissionFlagsBits.Administrator);
-  return member.roles.cache.has(config.ADMIN_ROLE_ID);
+function bookEmbedAdmin(book, requester) {
+  var embed = bookEmbedUser(book, "pending");
+  embed.addFields({ name: "Requested by", value: requester, inline: true });
+  return embed;
 }
 
-// ─── Pending requests store (in-memory + persisted to JSON) ────────────────
-const PENDING_FILE = "/config/pending-requests.json";
-let pendingRequests = {};
+function isAdmin(member) {
+  if (!member) return false;
+  if (config.ADMIN_ROLE_ID) return member.roles.cache.has(config.ADMIN_ROLE_ID);
+  return member.permissions.has(PermissionFlagsBits.Administrator);
+}
+
+async function getAdminUser(guild) {
+  if (config.ADMIN_USER_ID) {
+    try { return await client.users.fetch(config.ADMIN_USER_ID); }
+    catch (e) { log("WARN", "Could not fetch ADMIN_USER_ID", { error: e.message }); }
+  }
+  try {
+    var members = await guild.members.fetch();
+    var admin = members.find(function(m) {
+      return !m.user.bot && (config.ADMIN_ROLE_ID
+        ? m.roles.cache.has(config.ADMIN_ROLE_ID)
+        : m.permissions.has(PermissionFlagsBits.Administrator));
+    });
+    return admin ? admin.user : null;
+  } catch (e) { log("WARN", "Could not find admin", { error: e.message }); return null; }
+}
+
+function buildSearchUI(results, userId) {
+  var options = results.map(function(book, i) {
+    var parsed = parseBookTitle(book);
+    var year = book.releaseDate ? new Date(book.releaseDate).getFullYear() : "";
+    return {
+      label: parsed.title.slice(0, 100),
+      description: (parsed.author + (year ? " (" + year + ")" : "")).slice(0, 100),
+      value: String(i),
+    };
+  });
+
+  var selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("select_book_" + userId)
+      .setPlaceholder("Select a book here")
+      .addOptions(options)
+  );
+  var buttonRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("new_search_" + userId)
+      .setLabel("🔍 Search again")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embed: bookEmbedUser(results[0]), selectRow, buttonRow };
+}
+
+// ─── Pending store ─────────────────────────────────────────────────────────
+var PENDING_FILE = "/config/pending-requests.json";
+var pendingRequests = {};
 
 function loadPending() {
-  try {
-    if (fs.existsSync(PENDING_FILE)) {
-      pendingRequests = JSON.parse(fs.readFileSync(PENDING_FILE, "utf8"));
-    }
-  } catch (e) {
-    log("WARN", "Could not load pending requests", { error: e.message });
-  }
+  try { if (fs.existsSync(PENDING_FILE)) pendingRequests = JSON.parse(fs.readFileSync(PENDING_FILE, "utf8")); }
+  catch (e) { log("WARN", "Could not load pending requests", { error: e.message }); }
 }
 
 function savePending() {
-  try {
-    fs.writeFileSync(PENDING_FILE, JSON.stringify(pendingRequests, null, 2));
-  } catch (e) {
-    log("ERROR", "Could not save pending requests", { error: e.message });
-  }
+  try { fs.writeFileSync(PENDING_FILE, JSON.stringify(pendingRequests, null, 2)); }
+  catch (e) { log("ERROR", "Could not save pending requests", { error: e.message }); }
 }
 
 loadPending();
 
 // ─── Discord Client ────────────────────────────────────────────────────────
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages,
+  ],
 });
 
-// ─── Register Commands ─────────────────────────────────────────────────────
 const { REST, Routes } = require("discord.js");
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName("request")
-    .setDescription("Request an audiobook")
-    .addStringOption((o) =>
-      o.setName("title").setDescription("Book title or author to search").setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName("status")
-    .setDescription("Check the download queue and recent additions"),
-  new SlashCommandBuilder()
-    .setName("library")
-    .setDescription("Search the existing library")
-    .addStringOption((o) =>
-      o.setName("query").setDescription("Book title to search for").setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName("pending")
-    .setDescription("View pending requests (admin only)"),
-  new SlashCommandBuilder()
-    .setName("logs")
-    .setDescription("View recent bot logs (admin only)"),
-].map((c) => c.toJSON());
+var commands = [
+  new SlashCommandBuilder().setName("request").setDescription("Request an audiobook")
+    .addStringOption(function(o) { return o.setName("title").setDescription("Book title or author to search").setRequired(true); }),
+  new SlashCommandBuilder().setName("status").setDescription("Check the download queue"),
+  new SlashCommandBuilder().setName("library").setDescription("Search the existing library")
+    .addStringOption(function(o) { return o.setName("query").setDescription("Book title to search for").setRequired(true); }),
+  new SlashCommandBuilder().setName("pending").setDescription("View pending requests (admin only)"),
+  new SlashCommandBuilder().setName("logs").setDescription("View recent bot logs (admin only)"),
+].map(function(c) { return c.toJSON(); });
 
 async function registerCommands() {
-  const rest = new REST({ version: "10" }).setToken(config.DISCORD_TOKEN);
+  var rest = new REST({ version: "10" }).setToken(config.DISCORD_TOKEN);
   try {
     log("INFO", "Registering slash commands...");
-    const route = config.DISCORD_GUILD_ID
+    var route = config.DISCORD_GUILD_ID
       ? Routes.applicationGuildCommands(config.DISCORD_CLIENT_ID, config.DISCORD_GUILD_ID)
       : Routes.applicationCommands(config.DISCORD_CLIENT_ID);
     await rest.put(route, { body: commands });
     log("INFO", "Slash commands registered");
-  } catch (e) {
-    log("ERROR", "Failed to register commands", { error: e.message });
-  }
+  } catch (e) { log("ERROR", "Failed to register commands", { error: e.message }); }
 }
 
 // ─── Interaction Handler ───────────────────────────────────────────────────
-client.on("interactionCreate", async (interaction) => {
-  // ── Channel restriction ──
-  if (config.REQUEST_CHANNEL_ID && interaction.channelId !== config.REQUEST_CHANNEL_ID) {
-    if (interaction.isChatInputCommand()) {
-      return interaction.reply({
-        content: `❌ Please use <#${config.REQUEST_CHANNEL_ID}> for book requests.`,
-        ephemeral: true,
-      });
-    }
+client.on("interactionCreate", async function(interaction) {
+
+  if (config.REQUEST_CHANNEL_ID && interaction.channelId !== config.REQUEST_CHANNEL_ID && interaction.isChatInputCommand()) {
+    return interaction.reply({ content: "❌ Please use <#" + config.REQUEST_CHANNEL_ID + "> for book requests.", ephemeral: true });
   }
 
   // ── /request ──
   if (interaction.isChatInputCommand() && interaction.commandName === "request") {
-    const query = interaction.options.getString("title");
+    var query = interaction.options.getString("title");
     log("INFO", "Request command", { user: interaction.user.tag, query });
-
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
 
     try {
-      const results = await searchBooks(query);
+      var results = await searchBooks(query);
+      if (!results.length) return interaction.editReply({ content: "❌ No results found for **" + query + "**. Try a different search term." });
 
-      if (!results.length) {
-        log("INFO", "No results found", { query });
-        return interaction.editReply({ content: `❌ No results found for **${query}**. Try a different search term.` });
-      }
-
-      // Check if any are already in library
-      const library = await getLibrary();
-      const libraryIds = new Set(library.map((b) => b.foreignBookId));
-
-      const filtered = results.filter((b) => !libraryIds.has(b.foreignBookId));
-      const alreadyHave = results.filter((b) => libraryIds.has(b.foreignBookId));
+      var library = await getLibrary();
+      var libraryIds = new Set(library.map(function(b) { return b.foreignBookId; }));
+      var filtered = results.filter(function(b) { return !libraryIds.has(b.foreignBookId); });
+      var alreadyHave = results.filter(function(b) { return libraryIds.has(b.foreignBookId); });
 
       if (alreadyHave.length && !filtered.length) {
-        return interaction.editReply({
-          content: `✅ We already have **${alreadyHave[0].title}** in the library! Check Audiobookshelf.`,
-        });
+        return interaction.editReply({ content: "✅ **" + parseBookTitle(alreadyHave[0]).title + "** is already in the library! Check Audiobookshelf." });
       }
 
-      // Build select menu
-      const options = filtered.slice(0, 10).map((book, i) => {
-        const author = book.author?.authorName || "Unknown";
-        const year = book.releaseDate ? new Date(book.releaseDate).getFullYear() : "";
-        return {
-          label: book.title.slice(0, 100),
-          description: `${author}${year ? ` (${year})` : ""}`.slice(0, 100),
-          value: String(i),
-        };
-      });
-
-      const select = new StringSelectMenuBuilder()
-        .setCustomId(`select_book_${interaction.user.id}`)
-        .setPlaceholder("Select a book to request")
-        .addOptions(options);
-
-      const row = new ActionRowBuilder().addComponents(select);
-
-      // Store results temporarily
-      pendingRequests[`search_${interaction.user.id}`] = {
-        results: filtered.slice(0, 10),
-        timestamp: Date.now(),
-      };
+      pendingRequests["search_" + interaction.user.id] = { results: filtered.slice(0, 10), timestamp: Date.now() };
       savePending();
 
-      const embeds = filtered.slice(0, 1).map((b) => bookEmbed(b));
-
+      var ui = buildSearchUI(filtered.slice(0, 10), interaction.user.id);
       await interaction.editReply({
-        content: `Found **${filtered.length}** result(s) for **${query}**. Select a book below:`,
-        embeds,
-        components: [row],
+        content: "Please select a book from the list below",
+        embeds: [],
+        components: [ui.selectRow],
       });
     } catch (e) {
       log("ERROR", "Request command failed", { error: e.message });
-      await interaction.editReply({ content: `❌ Error searching Bookshelf: ${e.message}` });
+      await interaction.editReply({ content: "❌ Error searching Bookshelf: " + e.message });
     }
   }
 
-  // ── Select menu ──
+  // ── Select menu — show embed + Request button ──
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith("select_book_")) {
-    const userId = interaction.customId.replace("select_book_", "");
+    var userId = interaction.customId.replace("select_book_", "");
+    if (interaction.user.id !== userId) return interaction.reply({ content: "❌ This menu is not for you.", ephemeral: true });
 
-    if (interaction.user.id !== userId) {
-      return interaction.reply({ content: "❌ This menu is not for you.", ephemeral: true });
-    }
+    var stored = pendingRequests["search_" + userId];
+    if (!stored) return interaction.reply({ content: "❌ Search expired. Please run `/request` again.", ephemeral: true });
 
-    const searchKey = `search_${userId}`;
-    const stored = pendingRequests[searchKey];
-    if (!stored) {
-      return interaction.reply({ content: "❌ Search expired. Please run `/request` again.", ephemeral: true });
-    }
+    var book = stored.results[parseInt(interaction.values[0])];
+    var parsed = parseBookTitle(book);
 
-    const index = parseInt(interaction.values[0]);
-    const book = stored.results[index];
+    pendingRequests["selected_" + userId] = { book: book, timestamp: Date.now() };
+    savePending();
 
-    log("INFO", "Book selected", { user: interaction.user.tag, title: book.title });
+    var embed = bookEmbedUser(book);
+    var options = stored.results.map(function(b, i) {
+      var p = parseBookTitle(b);
+      var y = b.releaseDate ? new Date(b.releaseDate).getFullYear() : "";
+      return { label: p.title.slice(0, 100), description: (p.author + (y ? " (" + y + ")" : "")).slice(0, 100), value: String(i) };
+    });
 
+    var selectRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("select_book_" + userId)
+        .setPlaceholder(parsed.title.slice(0, 100))
+        .addOptions(options)
+    );
+    var buttonRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("confirm_request_" + userId).setLabel("Request").setStyle(ButtonStyle.Primary)
+    );
+
+    await interaction.update({ content: "", embeds: [embed], components: [selectRow, buttonRow] });
+  }
+
+  // ── Request button ──
+  if (interaction.isButton() && interaction.customId.startsWith("confirm_request_")) {
+    var userId = interaction.customId.replace("confirm_request_", "");
+    if (interaction.user.id !== userId) return interaction.reply({ content: "❌ This button is not for you.", ephemeral: true });
+
+    var selectedData = pendingRequests["selected_" + userId];
+    if (!selectedData) return interaction.reply({ content: "❌ Session expired. Please run `/request` again.", ephemeral: true });
+
+    var book = selectedData.book;
+    var parsed = parseBookTitle(book);
     await interaction.deferUpdate();
 
     if (config.REQUIRE_APPROVAL && !isAdmin(interaction.member)) {
-      // Store as pending approval
-      const requestId = `req_${Date.now()}_${userId}`;
-      pendingRequests[requestId] = {
-        book,
-        requester: interaction.user.tag,
-        requesterId: userId,
-        timestamp: Date.now(),
-        status: "pending",
-      };
-      delete pendingRequests[searchKey];
+      var requestId = "req_" + Date.now() + "_" + userId;
+      pendingRequests[requestId] = { book, requester: interaction.user.tag, requesterId: userId, timestamp: Date.now(), status: "pending" };
+      delete pendingRequests["selected_" + userId];
+      delete pendingRequests["search_" + userId];
       savePending();
 
-      log("INFO", "Request pending approval", { requestId, title: book.title, requester: interaction.user.tag });
-
-      const embed = bookEmbed(book, "pending", interaction.user.tag);
-      const approveRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel("❌ Deny").setStyle(ButtonStyle.Danger)
-      );
-
       await interaction.editReply({
-        content: `📋 **Request submitted for approval!** An admin will review your request for **${book.title}**.`,
-        embeds: [embed],
+        content: "📋 Your request for **" + parsed.title + "** has been submitted. You'll get a DM when it's handled.",
+        embeds: [bookEmbedUser(book, "pending")],
         components: [],
       });
 
-      // Notify admins if there's a request channel
-      if (config.REQUEST_CHANNEL_ID) {
-        const channel = await client.channels.fetch(config.REQUEST_CHANNEL_ID);
-        await channel.send({
-          content: `📬 New book request from ${interaction.user} pending approval:`,
-          embeds: [embed],
-          components: [approveRow],
-        });
-      }
+      try {
+        var adminUser = await getAdminUser(interaction.guild);
+        if (adminUser) {
+          await adminUser.send({
+            content: "📬 New audiobook request from **" + interaction.user.tag + "**:",
+            embeds: [bookEmbedAdmin(book, interaction.user.tag)],
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId("approve_" + requestId).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId("deny_" + requestId).setLabel("❌ Deny").setStyle(ButtonStyle.Danger)
+            )],
+          });
+        }
+      } catch (e) { log("ERROR", "Could not DM admin", { error: e.message }); }
     } else {
-      // Auto-approve or admin requesting
-      delete pendingRequests[searchKey];
+      delete pendingRequests["selected_" + userId];
+      delete pendingRequests["search_" + userId];
       savePending();
 
       try {
-        const added = await addBook(book);
-        log("INFO", "Book added and search triggered", { title: book.title, id: added.id });
-
-        const embed = bookEmbed(book, "approved", interaction.user.tag);
+        await addBook(book);
         await interaction.editReply({
-          content: `✅ **${book.title}** has been added to Bookshelf and a search has been triggered!`,
-          embeds: [embed],
+          content: "✅ **" + parsed.title + "** has been added and is now searching for a download!",
+          embeds: [bookEmbedUser(book, "approved")],
           components: [],
         });
       } catch (e) {
-        log("ERROR", "Failed to add book", { error: e.message, title: book.title });
-        await interaction.editReply({
-          content: `❌ Failed to add **${book.title}**: ${e.message}`,
-          components: [],
-        });
+        log("ERROR", "Failed to add book", { error: e.message });
+        await interaction.editReply({ content: "❌ Failed to add **" + parsed.title + "**: " + e.message, components: [] });
       }
     }
   }
 
-  // ── Approve/Deny buttons ──
-  if (interaction.isButton()) {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({ content: "❌ Only admins can approve or deny requests.", ephemeral: true });
-    }
+  // ── Approve/Deny (from admin DM) ──
+  if (interaction.isButton() && (interaction.customId.startsWith("approve_") || interaction.customId.startsWith("deny_"))) {
+    var parts = interaction.customId.split("_");
+    var action = parts[0];
+    var requestId = parts.slice(1).join("_");
+    var request = pendingRequests[requestId];
 
-    const [action, ...idParts] = interaction.customId.split("_");
-    const requestId = idParts.join("_");
-    const request = pendingRequests[requestId];
-
-    if (!request) {
-      return interaction.reply({ content: "❌ Request not found or already handled.", ephemeral: true });
-    }
-
+    if (!request) return interaction.reply({ content: "❌ Request not found or already handled.", ephemeral: true });
     await interaction.deferUpdate();
+    var parsedBook = parseBookTitle(request.book);
 
     if (action === "approve") {
       try {
-        const added = await addBook(request.book);
-        log("INFO", "Request approved", { requestId, title: request.book.title, approvedBy: interaction.user.tag });
-
-        request.status = "approved";
-        request.approvedBy = interaction.user.tag;
+        await addBook(request.book);
         delete pendingRequests[requestId];
         savePending();
-
-        const embed = bookEmbed(request.book, "approved", request.requester);
-        await interaction.editReply({
-          content: `✅ **${request.book.title}** approved by ${interaction.user.tag} and added to Bookshelf!`,
-          embeds: [embed],
-          components: [],
-        });
-
-        // DM the requester
+        var approveEmbed = bookEmbedAdmin(request.book, request.requester);
+        approveEmbed.setColor(0x00ff00);
+        await interaction.editReply({ content: "✅ **" + parsedBook.title + "** approved and added!", embeds: [approveEmbed], components: [] });
         try {
-          const requesterUser = await client.users.fetch(request.requesterId);
-          await requesterUser.send(`✅ Your request for **${request.book.title}** has been approved and is now downloading!`);
-        } catch (e) {
-          log("WARN", "Could not DM requester", { error: e.message });
-        }
+          var requesterUser = await client.users.fetch(request.requesterId);
+          await requesterUser.send({ content: "✅ Your request for **" + parsedBook.title + "** has been approved and is now downloading!", embeds: [bookEmbedUser(request.book, "approved")] });
+        } catch (e) { log("WARN", "Could not DM requester"); }
       } catch (e) {
         log("ERROR", "Approve failed", { error: e.message });
-        await interaction.editReply({ content: `❌ Failed to add book: ${e.message}`, components: [] });
+        await interaction.editReply({ content: "❌ Failed: " + e.message, components: [] });
       }
     }
 
     if (action === "deny") {
-      log("INFO", "Request denied", { requestId, title: request.book.title, deniedBy: interaction.user.tag });
       delete pendingRequests[requestId];
       savePending();
-
-      const embed = bookEmbed(request.book, "denied", request.requester);
-      await interaction.editReply({
-        content: `❌ **${request.book.title}** denied by ${interaction.user.tag}.`,
-        embeds: [embed],
-        components: [],
-      });
-
-      // DM the requester
+      var denyEmbed = bookEmbedAdmin(request.book, request.requester);
+      denyEmbed.setColor(0xff0000);
+      await interaction.editReply({ content: "❌ **" + parsedBook.title + "** denied.", embeds: [denyEmbed], components: [] });
       try {
-        const requesterUser = await client.users.fetch(request.requesterId);
-        await requesterUser.send(`❌ Your request for **${request.book.title}** was denied.`);
-      } catch (e) {
-        log("WARN", "Could not DM requester", { error: e.message });
-      }
+        var requesterUser2 = await client.users.fetch(request.requesterId);
+        await requesterUser2.send({ content: "❌ Your request for **" + parsedBook.title + "** was denied.", embeds: [bookEmbedUser(request.book, "denied")] });
+      } catch (e) { log("WARN", "Could not DM requester"); }
     }
   }
 
   // ── /status ──
   if (interaction.isChatInputCommand() && interaction.commandName === "status") {
-    await interaction.deferReply();
-    log("INFO", "Status command", { user: interaction.user.tag });
-
+    await interaction.deferReply({ ephemeral: true });
     try {
-      const queue = await getQueue();
-      const items = queue.records || queue || [];
-
-      if (!items.length) {
-        return interaction.editReply({ content: "📭 The download queue is empty." });
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle("📥 Download Queue")
-        .setColor(0x5865f2)
-        .setTimestamp()
-        .setFooter({ text: "Librarian" });
-
-      items.slice(0, 10).forEach((item) => {
-        const status = item.status || "unknown";
-        const size = item.size ? `${(item.size / 1024 / 1024).toFixed(0)}MB` : "";
-        embed.addFields({
-          name: item.title || "Unknown",
-          value: `Status: ${status}${size ? ` • ${size}` : ""}`,
-          inline: false,
-        });
+      var queue = await getQueue();
+      var items = queue.records || queue || [];
+      if (!items.length) return interaction.editReply({ content: "📭 The download queue is empty." });
+      var qEmbed = new EmbedBuilder().setTitle("📥 Download Queue").setColor(0x5865f2).setTimestamp().setFooter({ text: "Librarian" });
+      items.slice(0, 10).forEach(function(item) {
+        var size = item.size ? (item.size / 1024 / 1024).toFixed(0) + "MB" : "";
+        qEmbed.addFields({ name: item.title || "Unknown", value: "Status: " + (item.status || "unknown") + (size ? " • " + size : ""), inline: false });
       });
-
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [qEmbed] });
     } catch (e) {
-      log("ERROR", "Status command failed", { error: e.message });
-      await interaction.editReply({ content: `❌ Error fetching queue: ${e.message}` });
+      log("ERROR", "Status failed", { error: e.message });
+      await interaction.editReply({ content: "❌ Error: " + e.message });
     }
   }
 
   // ── /library ──
   if (interaction.isChatInputCommand() && interaction.commandName === "library") {
-    const query = interaction.options.getString("query").toLowerCase();
-    await interaction.deferReply();
-    log("INFO", "Library command", { user: interaction.user.tag, query });
-
+    var libQuery = interaction.options.getString("query").toLowerCase();
+    await interaction.deferReply({ ephemeral: true });
     try {
-      const library = await getLibrary();
-      const matches = library.filter(
-        (b) =>
-          b.title?.toLowerCase().includes(query) ||
-          b.author?.authorName?.toLowerCase().includes(query)
-      ).slice(0, 5);
-
-      if (!matches.length) {
-        return interaction.editReply({ content: `❌ No books matching **${query}** in the library.` });
-      }
-
-      const embeds = matches.map((b) => bookEmbed(b));
-      await interaction.editReply({
-        content: `Found **${matches.length}** match(es) in the library:`,
-        embeds,
-      });
+      var lib = await getLibrary();
+      var matches = lib.filter(function(b) {
+        return (b.title && b.title.toLowerCase().includes(libQuery)) ||
+          (b.author && b.author.authorName && b.author.authorName.toLowerCase().includes(libQuery));
+      }).slice(0, 5);
+      if (!matches.length) return interaction.editReply({ content: "❌ No books matching **" + libQuery + "** in the library." });
+      await interaction.editReply({ content: "Found **" + matches.length + "** match(es):", embeds: matches.map(function(b) { return bookEmbedUser(b); }) });
     } catch (e) {
-      log("ERROR", "Library command failed", { error: e.message });
-      await interaction.editReply({ content: `❌ Error searching library: ${e.message}` });
+      log("ERROR", "Library failed", { error: e.message });
+      await interaction.editReply({ content: "❌ Error: " + e.message });
     }
   }
 
   // ── /pending ──
   if (interaction.isChatInputCommand() && interaction.commandName === "pending") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
+    if (!isAdmin(interaction.member)) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
+    var pending = Object.entries(pendingRequests).filter(function(e) { return e[0].startsWith("req_") && e[1].status === "pending"; });
+    if (!pending.length) return interaction.reply({ content: "📭 No pending requests.", ephemeral: true });
+    await interaction.reply({ content: "📬 Sending **" + pending.length + "** pending request(s) to your DMs.", ephemeral: true });
+    for (var pi = 0; pi < Math.min(pending.length, 5); pi++) {
+      try {
+        await interaction.user.send({
+          content: "📋 Pending request:",
+          embeds: [bookEmbedAdmin(pending[pi][1].book, pending[pi][1].requester)],
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("approve_" + pending[pi][0]).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("deny_" + pending[pi][0]).setLabel("❌ Deny").setStyle(ButtonStyle.Danger)
+          )],
+        });
+      } catch (e) { log("WARN", "Could not DM admin pending"); }
     }
-
-    const pending = Object.entries(pendingRequests)
-      .filter(([k, v]) => k.startsWith("req_") && v.status === "pending");
-
-    if (!pending.length) {
-      return interaction.reply({ content: "📭 No pending requests.", ephemeral: true });
-    }
-
-    const embeds = pending.slice(0, 5).map(([id, req]) => {
-      const embed = bookEmbed(req.book, "pending", req.requester);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`approve_${id}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`deny_${id}`).setLabel("❌ Deny").setStyle(ButtonStyle.Danger)
-      );
-      return { embed, row };
-    });
-
-    await interaction.reply({
-      content: `📋 **${pending.length}** pending request(s):`,
-      embeds: embeds.map((e) => e.embed),
-      components: embeds.map((e) => e.row),
-      ephemeral: true,
-    });
   }
 
   // ── /logs ──
   if (interaction.isChatInputCommand() && interaction.commandName === "logs") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
-    }
-
+    if (!isAdmin(interaction.member)) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
     try {
-      const logContent = fs.readFileSync(config.LOG_FILE, "utf8");
-      const lines = logContent.trim().split("\n").slice(-20); // last 20 entries
-      const parsed = lines.map((l) => {
-        try {
-          const e = JSON.parse(l);
-          return `\`${e.timestamp.slice(11, 19)}\` **[${e.level}]** ${e.message}`;
-        } catch {
-          return l;
-        }
+      var lines = fs.readFileSync(config.LOG_FILE, "utf8").trim().split("\n").slice(-20);
+      var parsedLines = lines.map(function(l) {
+        try { var e = JSON.parse(l); return "`" + e.timestamp + "` **[" + e.level + "]** " + e.message; }
+        catch (err) { return l; }
       });
-
-      await interaction.reply({
-        content: `📋 **Recent logs:**\n${parsed.join("\n")}`,
-        ephemeral: true,
-      });
-    } catch (e) {
-      await interaction.reply({ content: `❌ Could not read logs: ${e.message}`, ephemeral: true });
-    }
+      await interaction.reply({ content: "📋 **Recent logs:**\n" + parsedLines.join("\n"), ephemeral: true });
+    } catch (e) { await interaction.reply({ content: "❌ Could not read logs: " + e.message, ephemeral: true }); }
   }
+
 });
 
 // ─── Ready ─────────────────────────────────────────────────────────────────
-client.once("ready", async () => {
-  log("INFO", `Bot online as ${client.user.tag}`);
+client.once("ready", async function() {
+  log("INFO", "Bot online as " + client.user.tag);
   await registerCommands();
 });
 
-client.login(config.DISCORD_TOKEN).catch((e) => {
+client.login(config.DISCORD_TOKEN).catch(function(e) {
   log("ERROR", "Login failed", { error: e.message });
   process.exit(1);
 });

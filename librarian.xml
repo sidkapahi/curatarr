@@ -110,6 +110,31 @@
   />
 
   <Config
+    Name="Admin User ID"
+    Target="ADMIN_USER_ID"
+    Default=""
+    Mode=""
+    Description="Optional but recommended. Your personal Discord User ID to receive approval DMs. Right-click your name in Discord → Copy User ID. If left blank, all server administrators will be DMed."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+
+  <Config
+    Name="Admin User ID"
+    Target="ADMIN_USER_ID"
+    Default=""
+    Mode=""
+    Description="Your Discord User ID to receive approval request DMs. Right-click your name in Discord and Copy User ID (requires Developer Mode enabled). Most reliable way to get notified of requests."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  />
+
+  <Config
     Name="Admin Role ID"
     Target="ADMIN_ROLE_ID"
     Default=""
@@ -118,6 +143,31 @@
     Type="Variable"
     Display="always"
     Required="false"
+    Mask="false"
+  />
+
+
+  <Config
+    Name="Quality Profile Name"
+    Target="QUALITY_PROFILE_NAME"
+    Default="Spoken"
+    Mode=""
+    Description="The name of the quality profile in Bookshelf to use for audiobooks. Must match exactly as shown in Bookshelf Settings > Profiles. Common values: Spoken, eBook."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  />
+
+  <Config
+    Name="Metadata Profile Name"
+    Target="METADATA_PROFILE_NAME"
+    Default="None"
+    Mode=""
+    Description="The name of the metadata profile in Bookshelf to use. Must match exactly as shown in Bookshelf Settings > Profiles. Common values: None, Standard."
+    Type="Variable"
+    Display="always"
+    Required="true"
     Mask="false"
   />
 
