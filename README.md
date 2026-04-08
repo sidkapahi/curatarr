@@ -115,11 +115,3 @@ All actions are logged to `/config/librarian.log` in JSON format:
 
 ---
 
-## Publishing to Docker Hub
-
-```bash
-docker build -t yourusername/librarian:latest .
-docker push yourusername/librarian:latest
-```
-
-Update the `Repository` field in `librarian.xml` to match your Docker Hub username before submitting to the Unraid Community Apps store.
