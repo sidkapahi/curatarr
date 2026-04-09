@@ -80,7 +80,7 @@ version: "3.8"
 
 services:
   curatarr:
-    image: fallsoldier/curatarr:latest
+    image: sidkapahiii/curatarr:latest
     container_name: curatarr
     restart: unless-stopped
     environment:
@@ -190,8 +190,8 @@ docker build -t curatarr:latest .
 To push to Docker Hub:
 
 ```bash
-docker tag curatarr:latest fallsoldier/curatarr:latest
-docker push fallsoldier/curatarr:latest
+docker tag curatarr:latest sidkapahiii/curatarr:latest
+docker push sidkapahiii/curatarr:latest
 ```
 
 ---
@@ -201,7 +201,7 @@ docker push fallsoldier/curatarr:latest
 If running from the Docker image:
 
 ```bash
-docker pull fallsoldier/curatarr:latest
+docker pull sidkapahiii/curatarr:latest
 docker restart curatarr
 ```
 
