@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   curatarr:
-    image: fallsoldier/curatarr:latest
+    image: sidkapahiii/curatarr:latest
     container_name: curatarr
     restart: unless-stopped
     environment:
